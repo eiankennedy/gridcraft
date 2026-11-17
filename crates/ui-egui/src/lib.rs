@@ -131,6 +131,12 @@ pub struct UiState {
     /// control is drawn only then.
     #[serde(skip)]
     pub keytip_invoke_next: Option<&'static str>,
+    /// Hands off: only the sheet is drawn (the grid with its headings, and the sheet tabs bar so
+    /// the sheet and the horizontal scroll bar stay visible): no title bar, ribbon, formula bar,
+    /// panes or status bar, for when an agent does the work and the person watches. Dialogs still
+    /// open. Set with `view.handsOff`; not saved, so the app always starts with its chrome.
+    #[serde(skip)]
+    pub hands_off: bool,
     /// Interface language. English by default (so tests and headless renders never depend on the
     /// host's locale); the desktop app starts from [`i18n::Language::system`] when `ui.json` has
     /// no usable language (see [`i18n::saved_language`]). An unknown saved value reads as English
@@ -175,6 +181,7 @@ impl Default for UiState {
             recent: vec![],
             keytip_invoke: None,
             keytip_invoke_next: None,
+            hands_off: false,
             language: i18n::Language::En,
             interface_scale: 100,
         }

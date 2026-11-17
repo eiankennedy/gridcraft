@@ -122,6 +122,7 @@ impl SheetApp {
         if let Some(answer) = self.desktop_theme.take_change() {
             self.desktop_dark = Some(answer);
         }
+        theme::sync_workbench(ctx, self.ui.dark);
         self.sync_theme_preference(ctx);
         self.sync_input_options(ctx);
         // The geometry captures are bound to. Native frames recorded it from their fresh
@@ -219,30 +220,37 @@ impl SheetApp {
         if !self.chrome.file_tab {
             self.backstage = None;
         }
+        // Hands off: only the sheet (grid, headings, sheet tabs and scroll bar). The File view
+        // still shows if something opened it.
+        let hands_off = self.ui.hands_off && self.backstage.is_none();
         // Keytips opened the File view (Alt, F): its letters keep working there.
-        if self.backstage.is_none() || self.keytips.prefix().is_some() {
+        if !hands_off && (self.backstage.is_none() || self.keytips.prefix().is_some()) {
             self.ribbon_keys(&ctx);
         }
-        if self.chrome.title_bar {
+        if self.chrome.title_bar && !hands_off {
             ribbon::title_bar(self, ui);
         }
         if self.backstage.is_some() {
             // File tab: the Backstage view replaces everything below the title bar.
             backstage::show(self, ui);
         } else {
-            ribbon::show(self, ui);
-            widgets::notice_bar(self, ui);
-            // Python mode edits only in the formula bar: it shows while a Python edit is open,
-            // also when the preference hides it.
-            if self.session.prefs.formula_bar || self.editor.as_ref().is_some_and(|e| e.python) {
-                formula_bar::show(self, ui);
-            }
-            if self.ui.status_bar {
-                tabs::status_bar(self, ui);
+            if !hands_off {
+                ribbon::show(self, ui);
+                widgets::notice_bar(self, ui);
+                // Python mode edits only in the formula bar: it shows while a Python edit is open,
+                // also when the preference hides it.
+                if self.session.prefs.formula_bar || self.editor.as_ref().is_some_and(|e| e.python) {
+                    formula_bar::show(self, ui);
+                }
+                if self.ui.status_bar {
+                    tabs::status_bar(self, ui);
+                }
             }
             tabs::sheet_tabs(self, ui);
-            pivot_pane::show(self, ui);
-            panes::show(self, ui);
+            if !hands_off {
+                pivot_pane::show(self, ui);
+                panes::show(self, ui);
+            }
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.grid_bg)).show(ui, |ui| {
                 let g0 = now_ms();
                 grid::show(self, ui);

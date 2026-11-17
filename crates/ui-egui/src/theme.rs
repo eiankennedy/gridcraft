@@ -15,6 +15,7 @@
 //! for text, 3:1 for glyphs) in both themes: a new token goes there too.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 #[cfg(not(target_arch = "wasm32"))]
 use egui::epaint::text::Blob;
@@ -41,6 +42,35 @@ pub use font_setup::{
 use font_setup::{candidates, craft_font_faces, font_definitions_impl, try_load};
 #[cfg(test)]
 pub(crate) use font_setup::{drop_unparseable_fonts, font_parses};
+
+/// Workbench's look (dark, flat, its mode's accent) when GridCraft runs inside Workbench's panel:
+/// 0 = off, else `0x01RRGGBB`. Set by the `view.workbench` command.
+static WORKBENCH: AtomicU32 = AtomicU32::new(0);
+
+/// Turn Workbench's look on with an accent colour, or off with `None`.
+pub fn set_workbench(accent: Option<Color32>) {
+    let v = accent.map_or(0, |c| 0x0100_0000 | (u32::from(c.r()) << 16) | (u32::from(c.g()) << 8) | u32::from(c.b()));
+    WORKBENCH.store(v, Ordering::Relaxed);
+}
+
+/// The accent Workbench set, when its look is on.
+pub fn workbench_accent() -> Option<Color32> {
+    let v = WORKBENCH.load(Ordering::Relaxed);
+    let [_, r, g, b] = v.to_be_bytes();
+    (v != 0).then(|| Color32::from_rgb(r, g, b))
+}
+
+/// Re-applies the visuals when Workbench's look was switched (or its accent changed) since this
+/// context last applied them, so every panel restyles on the next frame.
+pub fn sync_workbench(ctx: &egui::Context, dark: bool) {
+    let id = egui::Id::unique("gridcraft.workbench.applied");
+    let now = WORKBENCH.load(Ordering::Relaxed);
+    if ctx.data(|d| d.get_temp::<u32>(id)).unwrap_or(0) != now {
+        apply(ctx, dark);
+        ctx.data_mut(|d| d.insert_temp(id, now));
+        ctx.request_repaint();
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
@@ -296,7 +326,57 @@ impl Tokens {
         }
     }
 
+    /// Workbench's palette: near-black surfaces, hairline borders, warm white text, its mode's
+    /// accent for the selection and other highlights. The sheet stays white, as in the dark theme,
+    /// so the colours drawn on it keep their sheet values.
+    pub fn workbench(accent: Color32) -> Tokens {
+        let chrome = rgb(0x121316);
+        let card = rgb(0x18191C);
+        let border = rgb(0x333436);
+        let sunk = rgb(0x060607);
+        let hover = rgb(0x1C1D20);
+        let selected = rgb(0x26272A);
+        let [r, g, b, _] = accent.to_array();
+        Tokens {
+            window: chrome,
+            ribbon: chrome,
+            ribbon_border: border,
+            text: rgb(0xF2F1EE),
+            text_dim: rgb(0x989998),
+            text_disabled: rgb(0x838485),
+            accent,
+            accent_dark: accent,
+            accent_soft: selected,
+            hover,
+            pressed: selected,
+            separator: rgb(0x2A2B2D),
+            desk: sunk,
+            header_bg: chrome,
+            header_text: rgb(0x989998),
+            header_line: border,
+            header_sel_bg: selected,
+            header_sel_text: accent,
+            header_all_bg: border,
+            sel_fill: Color32::from_rgba_unmultiplied(r, g, b, 0x1C),
+            active_row: Color32::from_rgba_unmultiplied(r, g, b, 0x2C),
+            sel_border: accent,
+            input_bg: sunk,
+            input_border: border,
+            tab_bar: chrome,
+            tab_active: selected,
+            status_bar: chrome,
+            menu_bg: card,
+            shadow: Color32::from_black_alpha(120),
+            // Dark text on a light accent (Workbench's orange), white on a deep one.
+            on_accent: if luminance(accent) > 0.18 { sunk } else { Color32::WHITE },
+            ..Tokens::dark()
+        }
+    }
+
     pub fn get(ctx: &egui::Context) -> Tokens {
+        if let Some(a) = workbench_accent() {
+            return Tokens::workbench(a);
+        }
         if ctx.global_style().visuals.dark_mode { Tokens::dark() } else { Tokens::light() }
     }
 
@@ -327,13 +407,18 @@ pub fn contrast(a: Color32, b: Color32) -> f32 {
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
-/// Installs light and dark token visuals in both theme slots, keeps the 2-3 px widget and 8-10 px window/menu corner radii from 0.36, and sets spacing, text styles and the active theme.
+/// Installs light and dark token visuals in both theme slots (Workbench's in both while its look is on), keeps the 2-3 px widget and 8-10 px window/menu corner radii from 0.36, and sets spacing, text styles and the active theme.
 pub fn apply(ctx: &egui::Context, dark: bool) {
     // Install both palettes before System can switch between the style slots.
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
         let dark = theme == egui::Theme::Dark;
-        let t = if dark { Tokens::dark() } else { Tokens::light() };
-        let mut v = if dark { Visuals::dark() } else { Visuals::light() };
+        let workbench = workbench_accent();
+        let t = match workbench {
+            Some(a) => Tokens::workbench(a),
+            None if dark => Tokens::dark(),
+            None => Tokens::light(),
+        };
+        let mut v = if t.dark { Visuals::dark() } else { Visuals::light() };
         v.panel_fill = t.window;
         v.window_fill = t.menu_bg;
         v.extreme_bg_color = t.input_bg;
@@ -354,6 +439,19 @@ pub fn apply(ctx: &egui::Context, dark: bool) {
         v.widgets.open.corner_radius = egui::CornerRadius::same(2);
         v.window_corner_radius = egui::CornerRadius::same(10);
         v.menu_corner_radius = egui::CornerRadius::same(8);
+        if let Some(accent) = workbench {
+            // Workbench is square-cornered, flat, and highlights with its accent.
+            for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+                w.corner_radius = egui::CornerRadius::ZERO;
+            }
+            v.window_corner_radius = egui::CornerRadius::ZERO;
+            v.menu_corner_radius = egui::CornerRadius::ZERO;
+            v.window_stroke = Stroke::new(1.0, t.ribbon_border);
+            v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, t.separator);
+            v.text_edit_bg_color = Some(t.input_bg);
+            v.faint_bg_color = t.hover;
+            v.selection.bg_fill = accent.gamma_multiply(0.45);
+        }
         v.popup_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: t.shadow };
         ctx.set_visuals_of(theme, v);
     }
@@ -478,6 +576,19 @@ mod contrast_tests {
             }
         }
         assert!(failures.is_empty(), "contrast failures:\n{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn workbench_tokens_use_its_palette_and_keep_the_white_sheet() {
+        let accent = rgb(0xFF6000);
+        let (w, d) = (Tokens::workbench(accent), Tokens::dark());
+        assert!(w.dark);
+        assert_eq!((w.window, w.menu_bg, w.input_bg, w.text), (rgb(0x121316), rgb(0x18191C), rgb(0x060607), rgb(0xF2F1EE)));
+        assert_eq!((w.accent, w.sel_border, w.header_sel_text), (accent, accent, accent));
+        assert_eq!((w.grid_bg, w.cell_text, w.gridline), (d.grid_bg, d.cell_text, d.gridline), "the sheet stays white");
+        assert!(contrast(w.on_accent, w.accent) >= TEXT, "text on the accent reads");
+        assert!(contrast(w.on_accent, Tokens::workbench(rgb(0x1F3A93)).accent) < TEXT, "a deep accent takes white text instead");
+        assert!(contrast(Tokens::workbench(rgb(0x1F3A93)).on_accent, rgb(0x1F3A93)) >= TEXT);
     }
 
     #[test]

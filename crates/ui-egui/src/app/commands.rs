@@ -233,6 +233,24 @@ impl SheetApp {
                 self.ui.animations = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.animations);
                 Ok(json!({"on": self.ui.animations}))
             }
+            "view.workbench" => {
+                // Workbench's look (its palette, square corners, its accent); `theme::sync_workbench`
+                // restyles on the next frame.
+                let accent = match p.get("accent").and_then(Json::as_str) {
+                    Some(s) => match crate::widgets::parse_hex(s) {
+                        Some([r, g, b]) => Some(egui::Color32::from_rgb(r, g, b)),
+                        None => return Some(Err(format!("accent must be #rrggbb, not {s:?}"))),
+                    },
+                    None => crate::theme::workbench_accent(),
+                };
+                let on = p.get("on").and_then(Json::as_bool).unwrap_or(crate::theme::workbench_accent().is_none());
+                crate::theme::set_workbench(on.then(|| accent.unwrap_or(egui::Color32::from_rgb(0xFF, 0x60, 0x00))));
+                Ok(json!({"on": on}))
+            }
+            "view.handsOff" => {
+                self.ui.hands_off = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.hands_off);
+                Ok(json!({"on": self.ui.hands_off}))
+            }
             "options.autoComplete" => {
                 self.ui.autocomplete = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.autocomplete);
                 Ok(json!({"on": self.ui.autocomplete}))

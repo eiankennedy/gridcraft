@@ -63,3 +63,17 @@ fn turning_the_file_tab_off_closes_an_open_backstage() {
     h.run_steps(3);
     assert!(h.state().backstage.is_none(), "and closes when the host turns the File tab off");
 }
+
+#[test]
+fn hands_off_draws_only_the_sheet_and_brings_the_chrome_back() {
+    let mut h = harness(Chrome::default());
+    assert_eq!(h.state_mut().run("view.handsOff", serde_json::json!({"on": true})), Ok(serde_json::json!({"on": true})));
+    h.run_steps(3);
+    assert!(h.query_by_label("AutoSave").is_none(), "no title bar");
+    assert!(h.query_by_label("Paste").is_none(), "no ribbon");
+    assert!(h.query_by_label("Sheet1").is_some(), "the sheet tabs stay");
+    // No parameters: it toggles back.
+    assert_eq!(h.state_mut().run("view.handsOff", serde_json::json!({})), Ok(serde_json::json!({"on": false})));
+    h.run_steps(3);
+    assert!(h.query_by_label("AutoSave").is_some() && h.query_by_label("Paste").is_some(), "the title bar and ribbon come back");
+}

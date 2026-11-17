@@ -944,6 +944,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-embed"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "egui",
+ "egui-wgpu",
+ "log",
+ "png",
+ "pollster 0.4.0",
+ "raw-window-handle",
+ "wgpu",
+]
+
+[[package]]
 name = "craft-fonts-build"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=aa84415bae3b765fef6b7ef42404f66ad1cff9d9#aa84415bae3b765fef6b7ef42404f66ad1cff9d9"
@@ -2246,6 +2260,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "gridcraft-embed"
+version = "0.19.1"
+dependencies = [
+ "craft-embed",
+ "egui",
+ "gridcraft-engine",
+ "gridcraft-ui-egui",
+ "serde_json",
 ]
 
 [[package]]
